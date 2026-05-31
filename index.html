@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#d8e0ef" />
+  <meta name="description" content="Social media detox — sessions, streaks, and journaling." />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Mindful Break" />
+  <title>Mindful Break — Social Media Detox</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="mobile.css" />
+</head>
+<body>
+  <!-- Sign in / Sign up -->
+  <div id="auth-screen" class="auth-screen">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-icon" aria-hidden="true">🌿</span>
+        <h1>Mindful Break</h1>
+        <p class="tagline">Sign in to save your detox progress</p>
+      </div>
+
+      <div class="auth-tabs" role="tablist">
+        <button type="button" class="auth-tab active" data-auth-tab="login" role="tab" aria-selected="true">Sign in</button>
+        <button type="button" class="auth-tab" data-auth-tab="signup" role="tab" aria-selected="false">Create account</button>
+      </div>
+
+      <p class="auth-error hidden" id="auth-error" role="alert"></p>
+
+      <form id="form-login" class="auth-form" autocomplete="on">
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email" />
+
+        <label for="login-password">Password</label>
+        <input type="password" id="login-password" placeholder="Your password" required minlength="6" autocomplete="current-password" />
+
+        <button type="submit" class="btn btn-primary btn-lg auth-submit">Sign in</button>
+      </form>
+
+      <form id="form-signup" class="auth-form hidden" autocomplete="on">
+        <label for="signup-name">Display name</label>
+        <input type="text" id="signup-name" placeholder="How should we greet you?" required maxlength="32" autocomplete="name" />
+
+        <label for="signup-email">Email</label>
+        <input type="email" id="signup-email" placeholder="you@example.com" required autocomplete="email" />
+
+        <label for="signup-password">Password</label>
+        <input type="password" id="signup-password" placeholder="At least 6 characters" required minlength="6" autocomplete="new-password" />
+
+        <label for="signup-password-confirm">Confirm password</label>
+        <input type="password" id="signup-password-confirm" placeholder="Repeat password" required minlength="6" autocomplete="new-password" />
+
+        <button type="submit" class="btn btn-primary btn-lg auth-submit">Create account</button>
+      </form>
+
+      <p class="auth-note muted">Accounts are stored only on this device. No data is sent to a server.</p>
+    </div>
+  </div>
+
+  <div class="app hidden" id="main-app">
+    <header class="header">
+      <div class="header-top">
+        <div class="brand">
+          <span class="brand-icon" aria-hidden="true">🌿</span>
+          <div>
+            <h1>Mindful Break</h1>
+            <p class="tagline">Reclaim your attention</p>
+          </div>
+        </div>
+        <div class="header-user">
+          <span class="user-avatar" id="header-user-avatar" aria-hidden="true">?</span>
+          <div class="user-meta">
+            <span class="user-name" id="header-user-name">User</span>
+            <button type="button" class="text-btn sign-out-btn" id="btn-sign-out">Sign out</button>
+          </div>
+        </div>
+      </div>
+      <nav class="nav nav-scroll nav-desktop" role="tablist" aria-label="Main sections">
+        <button class="nav-btn active" data-view="dashboard" role="tab" aria-selected="true">Home</button>
+        <button class="nav-btn" data-view="session" role="tab" aria-selected="false">Detox</button>
+        <button class="nav-btn" data-view="offline" role="tab" aria-selected="false">Screen-Off</button>
+        <button class="nav-btn" data-view="forum" role="tab" aria-selected="false">Forum</button>
+        <button class="nav-btn" data-view="gamification" role="tab" aria-selected="false">Rewards</button>
+        <button class="nav-btn" data-view="notifications" role="tab" aria-selected="false">Alerts</button>
+        <button class="nav-btn" data-view="platforms" role="tab" aria-selected="false">Platforms</button>
+        <button class="nav-btn" data-view="journal" role="tab" aria-selected="false">Journal</button>
+        <button class="nav-btn" data-view="settings" role="tab" aria-selected="false">Settings</button>
+      </nav>
+    </header>
+
+    <main>
+      <!-- Dashboard -->
+      <section id="view-dashboard" class="view active" role="tabpanel">
+        <div class="stats-grid">
+          <article class="stat-card highlight">
+            <span class="stat-label">Current streak</span>
+            <span class="stat-value" id="stat-streak">0</span>
+            <span class="stat-unit">days</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Longest streak</span>
+            <span class="stat-value" id="stat-best-streak">0</span>
+            <span class="stat-unit">days</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Detox time</span>
+            <span class="stat-value" id="stat-hours">0</span>
+            <span class="stat-unit">hours total</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Sessions completed</span>
+            <span class="stat-value" id="stat-sessions">0</span>
+            <span class="stat-unit">all time</span>
+          </article>
+        </div>
+
+        <div class="dashboard-row">
+          <article class="card quote-card">
+            <p class="quote" id="daily-quote">Loading inspiration…</p>
+            <button type="button" class="text-btn" id="btn-new-quote">Another quote</button>
+          </article>
+
+          <article class="card checkin-card">
+            <h2>Today's check-in</h2>
+            <p class="muted">Did you stay off your blocked platforms today?</p>
+            <div class="checkin-actions" id="checkin-actions">
+              <button type="button" class="btn btn-success" id="btn-checkin-yes">Yes, I did it</button>
+              <button type="button" class="btn btn-ghost" id="btn-checkin-no">I slipped today</button>
+            </div>
+            <p class="checkin-status hidden" id="checkin-status"></p>
+          </article>
+        </div>
+
+        <article class="card">
+          <h2>Last 7 days</h2>
+          <div class="week-chart" id="week-chart" aria-label="Weekly check-in history"></div>
+        </article>
+
+        <article class="card">
+          <h2>Recent activity</h2>
+          <ul class="activity-list" id="activity-list">
+            <li class="empty-state">No activity yet. Start your first detox session!</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- Detox Session -->
+      <section id="view-session" class="view" role="tabpanel" hidden>
+        <article class="card session-card">
+          <div class="timer-ring" id="timer-ring">
+            <svg viewBox="0 0 120 120" aria-hidden="true">
+              <defs>
+                <linearGradient id="timer-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#14b8a6" />
+                  <stop offset="35%" stop-color="#6366f1" />
+                  <stop offset="70%" stop-color="#ec4899" />
+                  <stop offset="100%" stop-color="#f59e0b" />
+                </linearGradient>
+              </defs>
+              <circle class="ring-bg" cx="60" cy="60" r="54" />
+              <circle class="ring-progress" id="ring-progress" cx="60" cy="60" r="54" />
+            </svg>
+            <div class="timer-display">
+              <span class="timer-time" id="timer-display">25:00</span>
+              <span class="timer-label" id="timer-label">Ready to focus</span>
+            </div>
+          </div>
+
+          <div class="duration-picker" id="duration-picker">
+            <p class="label">Session length</p>
+            <div class="duration-btns">
+              <button type="button" class="chip" data-minutes="15">15 min</button>
+              <button type="button" class="chip active" data-minutes="25">25 min</button>
+              <button type="button" class="chip" data-minutes="45">45 min</button>
+              <button type="button" class="chip" data-minutes="60">1 hour</button>
+              <button type="button" class="chip" data-minutes="120">2 hours</button>
+            </div>
+          </div>
+
+          <div class="session-controls">
+            <button type="button" class="btn btn-primary btn-lg" id="btn-start-session">Start detox</button>
+            <button type="button" class="btn btn-secondary hidden" id="btn-pause-session">Pause</button>
+            <button type="button" class="btn btn-ghost hidden" id="btn-reset-session">Reset</button>
+          </div>
+
+          <p class="session-tip muted">Put your phone in another room. This timer helps you stay accountable — true app blocking requires OS settings.</p>
+        </article>
+      </section>
+
+      <!-- Platforms -->
+      <section id="view-platforms" class="view" role="tabpanel" hidden>
+        <article class="card">
+          <h2>Platforms to avoid</h2>
+          <p class="muted">Select the apps and sites you want to detox from. Your streak tracks days without using these.</p>
+          <ul class="platform-list" id="platform-list"></ul>
+          <div class="add-platform">
+            <input type="text" id="custom-platform" placeholder="Add custom platform…" maxlength="40" />
+            <button type="button" class="btn btn-secondary" id="btn-add-platform">Add</button>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Daily screen-time goal</h2>
+          <p class="muted">Set a maximum you'd like to spend on blocked platforms (honor system).</p>
+          <div class="goal-row">
+            <input type="range" id="goal-slider" min="0" max="120" step="5" value="30" />
+            <span class="goal-value"><span id="goal-display">30</span> min / day</span>
+          </div>
+        </article>
+      </section>
+
+      <!-- Journal -->
+      <section id="view-journal" class="view" role="tabpanel" hidden>
+        <article class="card">
+          <h2>Reflection journal</h2>
+          <p class="muted">How do you feel without social media? What did you do instead?</p>
+          <textarea id="journal-input" rows="5" placeholder="Write your thoughts…"></textarea>
+          <button type="button" class="btn btn-primary" id="btn-save-journal">Save entry</button>
+        </article>
+
+        <article class="card">
+          <div class="card-header-row">
+            <h2>Past entries</h2>
+            <div class="btn-row compact">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-export-journal-csv">Export CSV</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-export-journal-json">Export JSON</button>
+            </div>
+          </div>
+          <ul class="journal-list" id="journal-list">
+            <li class="empty-state">No journal entries yet.</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- Screen-Off Activities -->
+      <section id="view-offline" class="view" role="tabpanel" hidden>
+        <article class="card">
+          <h2>Screen-off activities</h2>
+          <p class="muted">Put your phone down and try something from these lists. Tap an activity when you complete it.</p>
+          <p class="offline-stat">You've completed <strong id="offline-count">0</strong> screen-off activities.</p>
+        </article>
+        <div class="category-tabs" id="offline-category-tabs" role="tablist"></div>
+        <div id="offline-activities-panel"></div>
+      </section>
+
+      <!-- Activity Forum -->
+      <section id="view-forum" class="view" role="tabpanel" hidden>
+        <article class="card">
+          <h2>Activity forum</h2>
+          <p class="muted">Share what you did instead of scrolling. Posts stay on this device.</p>
+          <div class="forum-compose">
+            <input type="text" id="forum-username" placeholder="Your name" maxlength="24" />
+            <textarea id="forum-post-input" rows="3" placeholder="What offline activity did you try today?"></textarea>
+            <button type="button" class="btn btn-primary" id="btn-forum-post">Post to forum</button>
+          </div>
+        </article>
+        <article class="card">
+          <h2>Community posts</h2>
+          <ul class="forum-list" id="forum-list">
+            <li class="empty-state">No posts yet. Be the first to share!</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- Gamification / Rewards -->
+      <section id="view-gamification" class="view" role="tabpanel" hidden>
+        <article class="card level-card">
+          <div class="level-header">
+            <div class="level-badge" id="game-level-badge" aria-hidden="true">1</div>
+            <div class="level-info">
+              <p class="level-label">Your rank</p>
+              <h2 id="game-level-title">Mindful Novice</h2>
+              <p class="muted" id="game-xp-text">0 / 100 XP to next level</p>
+            </div>
+          </div>
+          <div class="xp-bar-wrap" aria-label="Level progress">
+            <div class="xp-bar" id="game-xp-bar" style="width: 0%"></div>
+          </div>
+          <div class="game-stats-row">
+            <span>⭐ <strong id="game-total-xp">0</strong> total XP</span>
+            <span>🏆 <strong id="game-badge-count">0</strong> badges</span>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Today's challenges</h2>
+          <p class="muted">Complete all three for a bonus +50 XP (once per day).</p>
+          <ul class="challenge-list" id="challenge-list"></ul>
+        </article>
+
+        <article class="card">
+          <h2>Achievement badges</h2>
+          <p class="muted" id="badge-progress-text">0 of 0 unlocked</p>
+          <div class="badge-grid" id="badge-grid"></div>
+        </article>
+
+        <article class="card">
+          <h2>How to earn XP</h2>
+          <ul class="xp-rules" id="xp-rules"></ul>
+        </article>
+      </section>
+
+      <!-- Notifications -->
+      <section id="view-notifications" class="view" role="tabpanel" hidden>
+        <article class="card">
+          <h2>Notification settings</h2>
+          <p class="hint muted" id="notification-permission-status">Checking permission…</p>
+          <button type="button" class="btn btn-primary" id="btn-notif-allow">Allow notifications</button>
+
+          <label class="toggle-row">
+            <span>Daily check-in reminder</span>
+            <input type="checkbox" id="notif-checkin-enabled" />
+          </label>
+          <div class="reminder-time-row" id="notif-checkin-time-row">
+            <label for="notif-checkin-time">Check-in reminder time</label>
+            <input type="time" id="notif-checkin-time" value="20:00" />
+          </div>
+
+          <label class="toggle-row">
+            <span>Session complete alerts</span>
+            <input type="checkbox" id="notif-session-enabled" />
+          </label>
+
+          <label class="toggle-row">
+            <span>Screen-off activity suggestions</span>
+            <input type="checkbox" id="notif-activity-enabled" />
+          </label>
+          <div class="reminder-time-row" id="notif-activity-time-row">
+            <label for="notif-activity-time">Suggestion time (morning)</label>
+            <input type="time" id="notif-activity-time" value="09:00" />
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-header-row">
+            <h2>Notification history</h2>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-clear-notifications">Clear all</button>
+          </div>
+          <ul class="notification-list" id="notification-list">
+            <li class="empty-state">No notifications yet.</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- Settings -->
+      <section id="view-settings" class="view" role="tabpanel" hidden>
+        <article class="card install-card hidden" id="install-card">
+          <h2>Install app</h2>
+          <p class="muted">Add Mindful Break to your home screen for quick access, even offline.</p>
+          <button type="button" class="btn btn-primary" id="btn-install-pwa">Install on device</button>
+        </article>
+
+        <article class="card">
+          <h2>Notifications</h2>
+          <p class="muted">Manage reminders and view alert history on the Alerts tab.</p>
+          <button type="button" class="btn btn-secondary" id="btn-goto-notifications">Open notification page</button>
+        </article>
+
+        <article class="card account-card">
+          <h2>Your account</h2>
+          <p class="muted">Signed in as <strong id="settings-user-email">—</strong></p>
+          <p class="muted">Name: <strong id="settings-user-name">—</strong></p>
+          <button type="button" class="btn btn-ghost" id="btn-sign-out-settings">Sign out</button>
+        </article>
+
+        <article class="card">
+          <h2>Backup &amp; restore</h2>
+          <p class="muted">Export all your progress or restore from a previous backup file.</p>
+          <div class="btn-row">
+            <button type="button" class="btn btn-secondary" id="btn-export-all">Export full backup</button>
+            <label class="btn btn-ghost file-label">
+              Import backup
+              <input type="file" id="import-file" accept="application/json,.json" hidden />
+            </label>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Your data stays on this device — nothing is sent online.</p>
+      <p class="offline-badge hidden" id="offline-badge">Offline mode — app still works</p>
+    </footer>
+
+    <!-- Mobile bottom navigation -->
+    <nav class="mobile-nav" id="mobile-nav" aria-label="Mobile navigation">
+      <button type="button" class="mobile-nav-btn active" data-view="dashboard" aria-label="Home">
+        <span class="mobile-nav-icon" aria-hidden="true">🏠</span>
+        <span class="mobile-nav-label">Home</span>
+      </button>
+      <button type="button" class="mobile-nav-btn" data-view="session" aria-label="Detox session">
+        <span class="mobile-nav-icon" aria-hidden="true">⏱️</span>
+        <span class="mobile-nav-label">Detox</span>
+      </button>
+      <button type="button" class="mobile-nav-btn" data-view="offline" aria-label="Screen-off activities">
+        <span class="mobile-nav-icon" aria-hidden="true">📵</span>
+        <span class="mobile-nav-label">Offline</span>
+      </button>
+      <button type="button" class="mobile-nav-btn" data-view="gamification" aria-label="Rewards">
+        <span class="mobile-nav-icon" aria-hidden="true">🏆</span>
+        <span class="mobile-nav-label">Rewards</span>
+      </button>
+      <button type="button" class="mobile-nav-btn" data-view="more" id="btn-mobile-more" aria-label="More pages" aria-expanded="false">
+        <span class="mobile-nav-icon" aria-hidden="true">☰</span>
+        <span class="mobile-nav-label">More</span>
+      </button>
+    </nav>
+
+    <div class="mobile-menu hidden" id="mobile-menu" aria-hidden="true">
+      <button type="button" class="mobile-menu-backdrop" id="mobile-menu-backdrop" aria-label="Close menu"></button>
+      <div class="mobile-menu-panel" role="dialog" aria-label="More options">
+        <div class="mobile-menu-header">
+          <h2>More</h2>
+          <button type="button" class="mobile-menu-close" id="btn-mobile-menu-close" aria-label="Close">✕</button>
+        </div>
+        <ul class="mobile-menu-list">
+          <li><button type="button" class="mobile-menu-item" data-view="forum"><span>💬</span> Forum</button></li>
+          <li><button type="button" class="mobile-menu-item" data-view="notifications"><span>🔔</span> Alerts</button></li>
+          <li><button type="button" class="mobile-menu-item" data-view="platforms"><span>📱</span> Platforms</button></li>
+          <li><button type="button" class="mobile-menu-item" data-view="journal"><span>📓</span> Journal</button></li>
+          <li><button type="button" class="mobile-menu-item" data-view="settings"><span>⚙️</span> Settings</button></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="mobile-install-banner hidden" id="mobile-install-banner">
+      <p>Install Mindful Break for the best mobile experience</p>
+      <button type="button" class="btn btn-primary btn-sm" id="btn-mobile-install">Install app</button>
+      <button type="button" class="mobile-install-dismiss" id="btn-dismiss-install" aria-label="Dismiss">✕</button>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+
+  <dialog class="modal" id="modal-complete">
+    <div class="modal-content">
+      <span class="modal-emoji" aria-hidden="true">🎉</span>
+      <h2>Session complete!</h2>
+      <p>You stayed focused for the full detox. Great work.</p>
+      <button type="button" class="btn btn-primary" id="btn-modal-close">Continue</button>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

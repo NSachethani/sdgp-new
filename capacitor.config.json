@@ -1,0 +1,24 @@
+{
+  "appId": "com.mindfulbreak.detox",
+  "appName": "Mindful Break",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#d8e0ef"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#d8e0ef",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "LIGHT",
+      "backgroundColor": "#d8e0ef"
+    }
+  }
+}
