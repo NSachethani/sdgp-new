@@ -1,4 +1,7 @@
 {
-  "buildCommand": "node scripts/prepare-www.js",
-  "outputDirectory": "www"
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 30
+    }
+  }
 }

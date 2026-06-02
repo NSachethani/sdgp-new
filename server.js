@@ -2,39 +2,45 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const path = require("path");
-const fs = require("fs");
+const { Pool } = require("@neondatabase/serverless");
 const { v4: uuidv4 } = require("uuid");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "mindful-break-secret-change-in-production";
-const DB_PATH = path.join(__dirname, "data.db");
+const DATABASE_URL = process.env.DATABASE_URL;
+const IS_VERCEL = !!process.env.VERCEL;
 
-let db;
-
-function initDb() {
-  const initSqlJs = require("sql.js");
-  return initSqlJs().then((SQL) => {
-    if (fs.existsSync(DB_PATH)) {
-      db = new SQL.Database(fs.readFileSync(DB_PATH));
-    } else {
-      db = new SQL.Database();
-    }
-    db.run("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at TEXT NOT NULL)");
-    db.run("CREATE TABLE IF NOT EXISTS user_data (user_id TEXT PRIMARY KEY, data TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL)");
-    saveDb();
-    return db;
-  });
+let pool = null;
+if (DATABASE_URL) {
+  pool = new Pool({ connectionString: DATABASE_URL });
 }
 
-function saveDb() {
-  if (db) {
-    fs.writeFileSync(DB_PATH, Buffer.from(db.export()));
+async function query(text, params) {
+  if (!pool) throw new Error("DATABASE_URL not configured");
+  const client = await pool.connect();
+  try {
+    return await client.query(text, params);
+  } finally {
+    client.release();
   }
 }
 
+async function initDb() {
+  if (!pool) {
+    console.warn("DATABASE_URL not set — skipping DB init.");
+    return;
+  }
+  await query("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at TEXT NOT NULL)");
+  await query("CREATE TABLE IF NOT EXISTS user_data (user_id TEXT PRIMARY KEY, data TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL)");
+  console.log("Database tables ready");
+}
+
 app.use(express.json({ limit: "10mb" }));
-app.use(express.static(path.join(__dirname)));
+
+if (!IS_VERCEL) {
+  app.use(express.static(path.join(__dirname)));
+}
 
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
@@ -56,16 +62,14 @@ app.post("/api/auth/signup", async (req, res) => {
     if (!name || !email || !password) return res.status(400).json({ error: "Name, email, and password required" });
     if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
     const normalizedEmail = email.trim().toLowerCase();
-    const existing = db.exec(`SELECT id FROM users WHERE email = '${normalizedEmail.replace(/'/g, "''")}'`);
-    if (existing.length && existing[0].values.length) {
-      return res.status(409).json({ error: "An account with this email already exists" });
-    }
+    if (!pool) return res.status(500).json({ error: "Database not configured" });
+    const existing = await query("SELECT id FROM users WHERE email = $1", [normalizedEmail]);
+    if (existing.rows.length) return res.status(409).json({ error: "An account with this email already exists" });
     const passwordHash = await bcrypt.hash(password, 10);
     const id = "user_" + uuidv4();
     const now = new Date().toISOString();
-    const escName = name.trim().replace(/'/g, "''");
-    db.run(`INSERT INTO users (id, name, email, password_hash, created_at) VALUES ('${id}', '${escName}', '${normalizedEmail.replace(/'/g, "''")}', '${passwordHash.replace(/'/g, "''")}', '${now}')`);
-    saveDb();
+    await query("INSERT INTO users (id, name, email, password_hash, created_at) VALUES ($1, $2, $3, $4, $5)",
+      [id, name.trim(), normalizedEmail, passwordHash, now]);
     const token = jwt.sign({ userId: id }, JWT_SECRET, { expiresIn: "30d" });
     res.status(201).json({ token, user: { id, name: name.trim(), email: normalizedEmail } });
   } catch (err) {
@@ -79,14 +83,10 @@ app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: "Email and password required" });
     const normalizedEmail = email.trim().toLowerCase();
-    const result = db.exec(`SELECT * FROM users WHERE email = '${normalizedEmail.replace(/'/g, "''")}'`);
-    if (!result.length || !result[0].values.length) {
-      return res.status(401).json({ error: "No account found with this email" });
-    }
-    const row = result[0].values[0];
-    const cols = result[0].columns;
-    const user = {};
-    cols.forEach((c, i) => { user[c] = row[i]; });
+    if (!pool) return res.status(500).json({ error: "Database not configured" });
+    const result = await query("SELECT * FROM users WHERE email = $1", [normalizedEmail]);
+    if (!result.rows.length) return res.status(401).json({ error: "No account found with this email" });
+    const user = result.rows[0];
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.status(401).json({ error: "Incorrect password" });
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "30d" });
@@ -97,19 +97,23 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-app.get("/api/auth/me", authMiddleware, (req, res) => {
-  const result = db.exec(`SELECT id, name, email, created_at FROM users WHERE id = '${req.userId.replace(/'/g, "''")}'`);
-  if (!result.length || !result[0].values.length) return res.status(404).json({ error: "User not found" });
-  const cols = result[0].columns;
-  const user = {};
-  result[0].values[0].forEach((v, i) => { user[cols[i]] = v; });
-  res.json({ user });
+app.get("/api/auth/me", authMiddleware, async (req, res) => {
+  try {
+    if (!pool) return res.status(500).json({ error: "Database not configured" });
+    const result = await query("SELECT id, name, email, created_at FROM users WHERE id = $1", [req.userId]);
+    if (!result.rows.length) return res.status(404).json({ error: "User not found" });
+    res.json({ user: result.rows[0] });
+  } catch (err) {
+    console.error("Auth me error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
-app.get("/api/data", authMiddleware, (req, res) => {
+app.get("/api/data", authMiddleware, async (req, res) => {
   try {
-    const result = db.exec(`SELECT data FROM user_data WHERE user_id = '${req.userId.replace(/'/g, "''")}'`);
-    const data = result.length && result[0].values.length ? JSON.parse(result[0].values[0][0]) : null;
+    if (!pool) return res.status(500).json({ error: "Database not configured" });
+    const result = await query("SELECT data FROM user_data WHERE user_id = $1", [req.userId]);
+    const data = result.rows.length ? JSON.parse(result.rows[0].data) : null;
     res.json({ data });
   } catch (err) {
     console.error("Get data error:", err);
@@ -117,20 +121,17 @@ app.get("/api/data", authMiddleware, (req, res) => {
   }
 });
 
-app.put("/api/data", authMiddleware, (req, res) => {
+app.put("/api/data", authMiddleware, async (req, res) => {
   try {
     const data = req.body;
     if (!data || typeof data !== "object") return res.status(400).json({ error: "Invalid data" });
-    const json = JSON.stringify(data).replace(/'/g, "''");
-    const uid = req.userId.replace(/'/g, "''");
+    if (!pool) return res.status(500).json({ error: "Database not configured" });
+    const json = JSON.stringify(data);
     const now = new Date().toISOString();
-    const existing = db.exec(`SELECT 1 FROM user_data WHERE user_id = '${uid}'`);
-    if (existing.length && existing[0].values.length) {
-      db.run(`UPDATE user_data SET data = '${json}', updated_at = '${now}' WHERE user_id = '${uid}'`);
-    } else {
-      db.run(`INSERT INTO user_data (user_id, data, updated_at) VALUES ('${uid}', '${json}', '${now}')`);
-    }
-    saveDb();
+    await query(
+      "INSERT INTO user_data (user_id, data, updated_at) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET data = $2, updated_at = $3",
+      [req.userId, json, now]
+    );
     res.json({ ok: true });
   } catch (err) {
     console.error("Save data error:", err);
@@ -138,15 +139,19 @@ app.put("/api/data", authMiddleware, (req, res) => {
   }
 });
 
-app.get("/*", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
-});
-
-initDb().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Mindful Break server running at http://localhost:${PORT}`);
+if (!IS_VERCEL) {
+  app.get("/*", (req, res) => {
+    res.sendFile(path.join(__dirname, "index.html"));
   });
-}).catch((err) => {
-  console.error("Failed to initialize database:", err);
-  process.exit(1);
-});
+
+  initDb().then(() => {
+    app.listen(PORT, () => {
+      console.log(`Mindful Break running at http://localhost:${PORT}`);
+    });
+  }).catch((err) => {
+    console.error("DB init failed:", err);
+    process.exit(1);
+  });
+}
+
+module.exports = app;
