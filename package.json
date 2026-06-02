@@ -27,6 +27,7 @@
   "devDependencies": {
     "@capacitor/android": "^7.0.0",
     "@capacitor/cli": "^7.0.0",
-    "serve": "^14.2.4"
+    "serve": "^14.2.4",
+    "vercel": "^54.7.1"
   }
 }
