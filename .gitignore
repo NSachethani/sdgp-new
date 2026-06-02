@@ -4,3 +4,5 @@ android/
 ios/
 .DS_Store
 *.log
+data.db
+.env

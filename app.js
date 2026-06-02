@@ -1,99 +1,78 @@
-const LEGACY_STORAGE_KEY = "mindfulBreakData";
-const USERS_KEY = "mindfulBreakUsers";
-const SESSION_KEY = "mindfulBreakSession";
+const API_BASE = "";
+const TOKEN_KEY = "mindfulBreakToken";
+const USER_KEY = "mindfulBreakUser";
 
 let currentUser = null;
+let authToken = null;
 
-function getStorageKey(userId) {
-  return `mindfulBreakData_${userId}`;
+function getToken() { return localStorage.getItem(TOKEN_KEY); }
+function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
+function clearToken() { localStorage.removeItem(TOKEN_KEY); }
+function getStoredUser() {
+  try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch { return null; }
+}
+function setStoredUser(u) { localStorage.setItem(USER_KEY, JSON.stringify(u)); }
+function clearStoredUser() { localStorage.removeItem(USER_KEY); }
+
+async function apiFetch(path, options = {}) {
+  const token = getToken();
+  const headers = { "Content-Type": "application/json", ...options.headers };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const err = new Error(body.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
 }
 
-function getUsers() {
+// Offline/data cache for when server is unreachable
+let dataCache = null;
+let dataDirty = false;
+
+async function loadData() {
+  if (!currentUser) return createDefaultData();
   try {
-    const raw = localStorage.getItem(USERS_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (_) {}
-  return [];
+    const result = await apiFetch("/api/data");
+    if (result.data) {
+      dataCache = migrateData(result.data);
+      if (!dataCache.forumUsername || dataCache.forumUsername === "You") {
+        dataCache.forumUsername = currentUser.name;
+      }
+      return dataCache;
+    }
+  } catch {}
+  if (dataCache) return dataCache;
+  const fresh = createDefaultData();
+  fresh.forumUsername = currentUser.name;
+  return fresh;
 }
 
-function saveUsers(users) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
-
-function getSession() {
+async function saveData(dataToSave) {
+  if (!currentUser) return;
+  dataCache = dataToSave;
+  dataDirty = true;
   try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (_) {}
-  return null;
+    await apiFetch("/api/data", {
+      method: "PUT",
+      body: JSON.stringify(dataToSave),
+    });
+    dataDirty = false;
+  } catch {}
 }
 
-function setSession(user) {
-  localStorage.setItem(
-    SESSION_KEY,
-    JSON.stringify({ userId: user.id, email: user.email, name: user.name })
-  );
-  currentUser = { userId: user.id, email: user.email, name: user.name };
-}
-
-function clearSession() {
-  localStorage.removeItem(SESSION_KEY);
-  currentUser = null;
-}
-
-async function hashPassword(password, salt) {
-  const data = new TextEncoder().encode(`${salt}:${password}`);
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hash))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function generateSalt() {
-  return Array.from(crypto.getRandomValues(new Uint8Array(16)))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function normalizeEmail(email) {
-  return email.trim().toLowerCase();
-}
-
-function migrateLegacyData(userId) {
-  const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
-  if (!legacy) return;
-  const userKey = getStorageKey(userId);
-  if (!localStorage.getItem(userKey)) {
-    localStorage.setItem(userKey, legacy);
+function persistSync() {
+  if (dataDirty && dataCache && currentUser) {
+    apiFetch("/api/data", {
+      method: "PUT",
+      body: JSON.stringify(dataCache),
+    }).then(() => { dataDirty = false; }).catch(() => {});
   }
 }
-
-function createDefaultData() {
-  return {
-    streak: 0,
-    bestStreak: 0,
-    totalMinutes: 0,
-    sessionsCompleted: 0,
-    checkins: {},
-    platforms: DEFAULT_PLATFORMS.map((p) => ({ ...p })),
-    dailyGoalMinutes: 30,
-    activity: [],
-    journal: [],
-    remindersEnabled: false,
-    reminderTime: "20:00",
-    lastReminderDate: null,
-    notifSessionEnabled: true,
-    notifActivityEnabled: false,
-    notifActivityTime: "09:00",
-    lastActivityReminderDate: null,
-    forumPosts: [],
-    forumUsername: "You",
-    offlineCompleted: [],
-    notifications: [],
-    unlockedBadges: [],
-    dailyTrioDates: [],
-  };
-}
+setInterval(persistSync, 5000);
+window.addEventListener("beforeunload", persistSync);
 
 const DEFAULT_PLATFORMS = [
   { id: "instagram", name: "Instagram", icon: "📷", blocked: true },
@@ -108,8 +87,7 @@ const DEFAULT_PLATFORMS = [
 
 const OFFLINE_ACTIVITIES = {
   physical: {
-    label: "Physical",
-    icon: "🏃",
+    label: "Physical", icon: "🏃",
     items: [
       { id: "walk", title: "Take a 20-minute walk", desc: "Leave your phone at home or in your pocket.", duration: "20 min" },
       { id: "stretch", title: "Stretching routine", desc: "Loosen neck, shoulders, and back from scrolling posture.", duration: "10 min" },
@@ -118,8 +96,7 @@ const OFFLINE_ACTIVITIES = {
     ],
   },
   creative: {
-    label: "Creative",
-    icon: "🎨",
+    label: "Creative", icon: "🎨",
     items: [
       { id: "draw", title: "Sketch or doodle", desc: "Draw what you see around you — no posting required.", duration: "15 min" },
       { id: "write", title: "Free writing", desc: "Write three pages of whatever comes to mind.", duration: "20 min" },
@@ -128,8 +105,7 @@ const OFFLINE_ACTIVITIES = {
     ],
   },
   social: {
-    label: "Social",
-    icon: "💬",
+    label: "Social", icon: "💬",
     items: [
       { id: "call", title: "Call someone you miss", desc: "A real voice beats a comment thread.", duration: "15 min" },
       { id: "letter", title: "Write a letter or card", desc: "On paper — send it later.", duration: "20 min" },
@@ -138,8 +114,7 @@ const OFFLINE_ACTIVITIES = {
     ],
   },
   mindful: {
-    label: "Mindful",
-    icon: "🧘",
+    label: "Mindful", icon: "🧘",
     items: [
       { id: "breathe", title: "Breathing exercise", desc: "4 seconds in, 4 hold, 4 out — repeat 10 times.", duration: "5 min" },
       { id: "meditate", title: "Meditation", desc: "Sit quietly and notice your breath.", duration: "10 min" },
@@ -148,8 +123,7 @@ const OFFLINE_ACTIVITIES = {
     ],
   },
   outdoor: {
-    label: "Outdoors",
-    icon: "🌳",
+    label: "Outdoors", icon: "🌳",
     items: [
       { id: "nature", title: "Nature walk", desc: "Notice trees, birds, sky — no photos needed.", duration: "30 min" },
       { id: "garden", title: "Garden or plants", desc: "Water, prune, or repot something living.", duration: "20 min" },
@@ -158,8 +132,7 @@ const OFFLINE_ACTIVITIES = {
     ],
   },
   learning: {
-    label: "Learning",
-    icon: "📚",
+    label: "Learning", icon: "📚",
     items: [
       { id: "skill", title: "Practice a skill", desc: "Language, coding on paper, knitting — screen-free.", duration: "30 min" },
       { id: "podcast", title: "Podcast with eyes closed", desc: "Listen only — no feed scrolling.", duration: "25 min" },
@@ -171,22 +144,15 @@ const OFFLINE_ACTIVITIES = {
 
 const FORUM_STARTER_POSTS = [
   {
-    id: "starter-1",
-    author: "Maya",
+    id: "starter-1", author: "Maya",
     text: "Replaced my morning scroll with a 15-minute walk. Felt more awake than any reel ever made me.",
-    at: new Date(Date.now() - 86400000 * 2).toISOString(),
-    likes: 3,
-    liked: false,
+    at: new Date(Date.now() - 86400000 * 2).toISOString(), likes: 3, liked: false,
     replies: [{ author: "Alex", text: "Going to try this tomorrow!", at: new Date(Date.now() - 86400000).toISOString() }],
   },
   {
-    id: "starter-2",
-    author: "Jordan",
+    id: "starter-2", author: "Jordan",
     text: "Called my grandmother instead of watching stories. Best detox win this week.",
-    at: new Date(Date.now() - 86400000 * 5).toISOString(),
-    likes: 5,
-    liked: false,
-    replies: [],
+    at: new Date(Date.now() - 86400000 * 5).toISOString(), likes: 5, liked: false, replies: [],
   },
 ];
 
@@ -249,23 +215,6 @@ function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function loadData() {
-  if (!currentUser) return createDefaultData();
-  try {
-    const raw = localStorage.getItem(getStorageKey(currentUser.userId));
-    if (raw) {
-      const d = migrateData(JSON.parse(raw));
-      if (!d.forumUsername || d.forumUsername === "You") {
-        d.forumUsername = currentUser.name;
-      }
-      return d;
-    }
-  } catch (_) {}
-  const fresh = createDefaultData();
-  fresh.forumUsername = currentUser.name;
-  return fresh;
-}
-
 function migrateData(d) {
   if (d.remindersEnabled === undefined) d.remindersEnabled = false;
   if (!d.reminderTime) d.reminderTime = "20:00";
@@ -284,21 +233,28 @@ function migrateData(d) {
   return d;
 }
 
-function saveData(dataToSave) {
-  if (!currentUser) return;
-  localStorage.setItem(getStorageKey(currentUser.userId), JSON.stringify(dataToSave));
+function createDefaultData() {
+  return {
+    streak: 0, bestStreak: 0, totalMinutes: 0, sessionsCompleted: 0,
+    checkins: {}, platforms: DEFAULT_PLATFORMS.map((p) => ({ ...p })),
+    dailyGoalMinutes: 30, activity: [], journal: [],
+    remindersEnabled: false, reminderTime: "20:00", lastReminderDate: null,
+    notifSessionEnabled: true, notifActivityEnabled: false, notifActivityTime: "09:00",
+    lastActivityReminderDate: null, forumPosts: [], forumUsername: "You",
+    offlineCompleted: [], notifications: [], unlockedBadges: [], dailyTrioDates: [],
+  };
 }
 
 let data = createDefaultData();
 
-// Timer state
 let selectedMinutes = 25;
 let remainingSeconds = 25 * 60;
 let timerInterval = null;
 let timerRunning = false;
+let timerStartTime = null;
+let timerElapsedBeforePause = 0;
 const CIRCUMFERENCE = 2 * Math.PI * 54;
 
-// DOM refs
 const views = document.querySelectorAll(".view");
 const navBtns = document.querySelectorAll(".nav-btn[data-view]");
 const MOBILE_PRIMARY_VIEWS = ["dashboard", "session", "offline", "gamification"];
@@ -313,10 +269,7 @@ function showToast(message) {
 }
 
 function addActivity(text) {
-  data.activity.unshift({
-    text,
-    at: new Date().toISOString(),
-  });
+  data.activity.unshift({ text, at: new Date().toISOString() });
   if (data.activity.length > 20) data.activity.length = 20;
   saveData(data);
   renderActivity();
@@ -324,12 +277,8 @@ function addActivity(text) {
 
 function logNotification(title, body, type = "info") {
   data.notifications.unshift({
-    id: "n-" + Date.now(),
-    title,
-    body,
-    type,
-    at: new Date().toISOString(),
-    read: false,
+    id: "n-" + Date.now(), title, body, type,
+    at: new Date().toISOString(), read: false,
   });
   if (data.notifications.length > 50) data.notifications.length = 50;
   saveData(data);
@@ -343,9 +292,7 @@ function sendBrowserNotification(title, body, tag) {
   logNotification(title, body, tag);
 }
 
-function switchToView(viewId) {
-  switchView(viewId);
-}
+function switchToView(viewId) { switchView(viewId); }
 
 function closeMobileMenu() {
   const menu = document.getElementById("mobile-menu");
@@ -372,19 +319,13 @@ function openMobileMenu() {
 }
 
 function switchView(viewId) {
-  if (viewId === "more") {
-    openMobileMenu();
-    return;
-  }
-
+  if (viewId === "more") { openMobileMenu(); return; }
   closeMobileMenu();
-
   navBtns.forEach((b) => {
     const active = b.dataset.view === viewId;
     b.classList.toggle("active", active);
     b.setAttribute("aria-selected", active ? "true" : "false");
   });
-
   document.querySelectorAll(".mobile-nav-btn").forEach((b) => {
     const v = b.dataset.view;
     if (v === "more") {
@@ -393,15 +334,12 @@ function switchView(viewId) {
       b.classList.toggle("active", v === viewId);
     }
   });
-
   views.forEach((v) => {
     const match = v.id === `view-${viewId}`;
     v.classList.toggle("active", match);
     v.hidden = !match;
   });
-
   if (viewId === "gamification") renderGamification();
-
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -409,9 +347,7 @@ function getGamificationStats() {
   const today = todayKey();
   const userPosts = data.forumPosts.filter((p) => !String(p.id).startsWith("starter-")).length;
   const successCheckins = Object.values(data.checkins).filter((s) => s === "success").length;
-  const sessionToday = data.activity.some(
-    (a) => a.at.startsWith(today) && /detox session/i.test(a.text)
-  );
+  const sessionToday = data.activity.some((a) => a.at.startsWith(today) && /detox session/i.test(a.text));
   const offlineToday = data.offlineCompleted.some((c) => c.date === today);
   const checkinToday = data.checkins[today] === "success";
   const challenges = { sessionToday, offlineToday, checkinToday };
@@ -425,57 +361,32 @@ function getGamificationStats() {
 
   const dailyTrioEver = data.dailyTrioDates.length > 0;
   const baseXp =
-    data.sessionsCompleted * 50 +
-    data.totalMinutes * 2 +
-    successCheckins * 35 +
-    data.offlineCompleted.length * 40 +
-    data.journal.length * 25 +
-    userPosts * 20 +
-    data.streak * 15;
+    data.sessionsCompleted * 50 + data.totalMinutes * 2 + successCheckins * 35 +
+    data.offlineCompleted.length * 40 + data.journal.length * 25 + userPosts * 20 + data.streak * 15;
   const challengeBonus = data.dailyTrioDates.length * 50;
   const totalXp = baseXp + challengeBonus;
   const levelInfo = getLevelFromXp(totalXp);
 
   return {
-    totalXp,
-    level: levelInfo.level,
-    levelTitle: levelInfo.title,
-    levelXp: levelInfo.currentXp,
-    levelXpNeeded: levelInfo.xpForNext,
-    levelProgress: levelInfo.progress,
-    sessions: data.sessionsCompleted,
-    totalMinutes: data.totalMinutes,
-    streak: data.streak,
-    bestStreak: data.bestStreak,
-    offlineCount: data.offlineCompleted.length,
-    journalCount: data.journal.length,
-    userPosts,
-    successCheckins,
-    challenges,
-    allChallengesToday,
-    dailyTrioEver,
+    totalXp, level: levelInfo.level, levelTitle: levelInfo.title,
+    levelXp: levelInfo.currentXp, levelXpNeeded: levelInfo.xpForNext,
+    levelProgress: levelInfo.progress, sessions: data.sessionsCompleted,
+    totalMinutes: data.totalMinutes, streak: data.streak, bestStreak: data.bestStreak,
+    offlineCount: data.offlineCompleted.length, journalCount: data.journal.length,
+    userPosts, successCheckins, challenges, allChallengesToday, dailyTrioEver,
   };
 }
 
 function getLevelFromXp(xp) {
   let current = LEVELS[0];
   for (let i = LEVELS.length - 1; i >= 0; i--) {
-    if (xp >= LEVELS[i].xp) {
-      current = LEVELS[i];
-      break;
-    }
+    if (xp >= LEVELS[i].xp) { current = LEVELS[i]; break; }
   }
   const next = LEVELS.find((l) => l.xp > current.xp);
   const currentXp = xp - current.xp;
   const xpForNext = next ? next.xp - current.xp : 0;
   const progress = next ? Math.min(100, (currentXp / xpForNext) * 100) : 100;
-  return {
-    level: current.level,
-    title: current.title,
-    currentXp,
-    xpForNext: next ? xpForNext : currentXp,
-    progress,
-  };
+  return { level: current.level, title: current.title, currentXp, xpForNext: next ? xpForNext : currentXp, progress };
 }
 
 function syncBadges() {
@@ -490,7 +401,7 @@ function syncBadges() {
   if (newlyUnlocked.length) {
     saveData(data);
     newlyUnlocked.forEach((badge) => {
-      showToast(`🏆 Badge unlocked: ${badge.title}`);
+      showToast(`Badge unlocked: ${badge.title}`);
       logNotification("Badge unlocked!", badge.title, "badge");
       addActivity(`Earned badge: ${badge.title}`);
     });
@@ -537,20 +448,18 @@ function renderGamification() {
     { key: "offlineToday", text: "Log a screen-off activity", xp: 40 },
     { key: "checkinToday", text: "Successful daily check-in", xp: 35 },
   ];
+
   challengeList.innerHTML =
-    challengeDefs
-      .map((c) => {
-        const done = stats.challenges[c.key];
-        return `
-        <li class="challenge-item ${done ? "done" : ""}">
-          <span class="challenge-check" aria-hidden="true">${done ? "✓" : ""}</span>
-          <span class="challenge-text">${c.text}</span>
-          <span class="challenge-xp">+${c.xp} XP</span>
-        </li>`;
-      })
-      .join("") +
+    challengeDefs.map((c) => {
+      const done = stats.challenges[c.key];
+      return `<li class="challenge-item ${done ? "done" : ""}">
+        <span class="challenge-check" aria-hidden="true">${done ? "✓" : ""}</span>
+        <span class="challenge-text">${c.text}</span>
+        <span class="challenge-xp">+${c.xp} XP</span>
+      </li>`;
+    }).join("") +
     `<li class="challenge-bonus ${stats.allChallengesToday ? "claimed" : "pending"}">
-      ${stats.allChallengesToday ? "🎉 Daily trio complete! +50 bonus XP earned" : "Complete all 3 for +50 bonus XP"}
+      ${stats.allChallengesToday ? "Daily trio complete! +50 bonus XP earned" : "Complete all 3 for +50 bonus XP"}
     </li>`;
 
   const badgeGrid = document.getElementById("badge-grid");
@@ -559,12 +468,11 @@ function renderGamification() {
 
   badgeGrid.innerHTML = BADGES.map((badge) => {
     const unlocked = unlockedSet.has(badge.id) || badge.check(stats);
-    return `
-      <div class="badge-card ${unlocked ? "unlocked" : "locked"}" title="${escapeHtml(badge.desc)}">
-        <span class="badge-icon" aria-hidden="true">${badge.icon}</span>
-        <div class="badge-title">${escapeHtml(badge.title)}</div>
-        <div class="badge-desc">${escapeHtml(badge.desc)}</div>
-      </div>`;
+    return `<div class="badge-card ${unlocked ? "unlocked" : "locked"}" title="${escapeHtml(badge.desc)}">
+      <span class="badge-icon" aria-hidden="true">${badge.icon}</span>
+      <div class="badge-title">${escapeHtml(badge.title)}</div>
+      <div class="badge-desc">${escapeHtml(badge.desc)}</div>
+    </div>`;
   }).join("");
 
   const rulesEl = document.getElementById("xp-rules");
@@ -582,27 +490,18 @@ function onGamificationAction() {
 
 function formatDate(iso) {
   const d = new Date(iso);
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-// Navigation (desktop + mobile)
 navBtns.forEach((btn) => {
   btn.addEventListener("click", () => switchView(btn.dataset.view));
 });
-
 document.querySelectorAll(".mobile-nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => switchView(btn.dataset.view));
 });
-
 document.querySelectorAll(".mobile-menu-item").forEach((btn) => {
   btn.addEventListener("click", () => switchView(btn.dataset.view));
 });
-
 document.getElementById("mobile-menu-backdrop")?.addEventListener("click", closeMobileMenu);
 document.getElementById("btn-mobile-menu-close")?.addEventListener("click", closeMobileMenu);
 
@@ -616,11 +515,8 @@ function initMobileInstallBanner() {
   if (isNativeApp()) return;
   const dismissed = localStorage.getItem("mindfulBreakInstallDismissed");
   const isMobile = window.matchMedia("(max-width: 767px)").matches;
-  const isStandalone =
-    window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
-  if (isMobile && !isStandalone && !dismissed) {
-    banner.classList.remove("hidden");
-  }
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+  if (isMobile && !isStandalone && !dismissed) banner.classList.remove("hidden");
   document.getElementById("btn-dismiss-install")?.addEventListener("click", () => {
     localStorage.setItem("mindfulBreakInstallDismissed", "1");
     banner.classList.add("hidden");
@@ -633,14 +529,11 @@ function initMobileInstallBanner() {
       banner.classList.add("hidden");
     } else {
       const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
-      showToast(
-        isIos ? 'Tap Share, then "Add to Home Screen"' : "Use browser menu → Install app"
-      );
+      showToast(isIos ? 'Tap Share, then "Add to Home Screen"' : "Use browser menu → Install app");
     }
   });
 }
 
-// Dashboard stats
 function renderStats() {
   document.getElementById("stat-streak").textContent = data.streak;
   document.getElementById("stat-best-streak").textContent = data.bestStreak;
@@ -652,42 +545,26 @@ function renderWeekChart() {
   const container = document.getElementById("week-chart");
   container.innerHTML = "";
   const today = new Date();
-
   for (let i = 6; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
     const key = d.toISOString().slice(0, 10);
     const status = data.checkins[key];
     const isFuture = key > todayKey();
-
     const col = document.createElement("div");
     col.className = "day-col";
-
     const barWrap = document.createElement("div");
     barWrap.className = "day-bar-wrap";
-
     const bar = document.createElement("div");
     bar.className = "day-bar";
-    if (isFuture) {
-      bar.classList.add("future");
-      bar.style.height = "4px";
-    } else if (status === "success") {
-      bar.classList.add("success");
-      bar.style.height = "56px";
-    } else if (status === "slip") {
-      bar.classList.add("slip");
-      bar.style.height = "32px";
-    } else {
-      bar.classList.add("none");
-      bar.style.height = "4px";
-    }
-
+    if (isFuture) { bar.classList.add("future"); bar.style.height = "4px"; }
+    else if (status === "success") { bar.classList.add("success"); bar.style.height = "56px"; }
+    else if (status === "slip") { bar.classList.add("slip"); bar.style.height = "32px"; }
+    else { bar.classList.add("none"); bar.style.height = "4px"; }
     barWrap.appendChild(bar);
-
     const label = document.createElement("span");
     label.className = "day-label";
     label.textContent = d.toLocaleDateString(undefined, { weekday: "short" });
-
     col.appendChild(barWrap);
     col.appendChild(label);
     container.appendChild(col);
@@ -699,7 +576,6 @@ function renderCheckin() {
   const statusEl = document.getElementById("checkin-status");
   const actionsEl = document.getElementById("checkin-actions");
   const existing = data.checkins[today];
-
   if (existing) {
     actionsEl.classList.add("hidden");
     statusEl.classList.remove("hidden");
@@ -721,16 +597,13 @@ function updateStreak(success) {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayKey = yesterday.toISOString().slice(0, 10);
-
   data.checkins[today] = success ? "success" : "slip";
-
   if (success) {
     data.streak = data.checkins[yesterdayKey] === "success" ? data.streak + 1 : 1;
     if (data.streak > data.bestStreak) data.bestStreak = data.streak;
   } else {
     data.streak = 0;
   }
-
   saveData(data);
   renderStats();
   renderWeekChart();
@@ -751,7 +624,6 @@ document.getElementById("btn-checkin-no").addEventListener("click", () => {
   onGamificationAction();
 });
 
-// Quotes
 function showQuote() {
   const q = QUOTES[Math.floor(Math.random() * QUOTES.length)];
   document.getElementById("daily-quote").textContent = q;
@@ -759,7 +631,6 @@ function showQuote() {
 
 document.getElementById("btn-new-quote").addEventListener("click", showQuote);
 
-// Activity
 function renderActivity() {
   const list = document.getElementById("activity-list");
   if (!data.activity.length) {
@@ -767,10 +638,7 @@ function renderActivity() {
     return;
   }
   list.innerHTML = data.activity
-    .map(
-      (a) =>
-        `<li><span class="activity-time">${formatDate(a.at)}</span><br>${escapeHtml(a.text)}</li>`
-    )
+    .map((a) => `<li><span class="activity-time">${formatDate(a.at)}</span><br>${escapeHtml(a.text)}</li>`)
     .join("");
 }
 
@@ -780,7 +648,6 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-// Timer
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
@@ -805,7 +672,6 @@ function setTimerUIState(state) {
   const pauseBtn = document.getElementById("btn-pause-session");
   const resetBtn = document.getElementById("btn-reset-session");
   const label = document.getElementById("timer-label");
-
   if (state === "idle") {
     picker.classList.remove("hidden");
     startBtn.classList.remove("hidden");
@@ -830,17 +696,14 @@ function completeSession() {
   clearInterval(timerInterval);
   timerInterval = null;
   timerRunning = false;
-
   data.totalMinutes += selectedMinutes;
   data.sessionsCompleted += 1;
   saveData(data);
   addActivity(`Completed ${selectedMinutes}-minute detox session`);
   renderStats();
-
   remainingSeconds = selectedMinutes * 60;
   setTimerDisplay();
   setTimerUIState("idle");
-
   if (data.notifSessionEnabled) {
     const title = "Detox session complete!";
     const body = `You focused for ${selectedMinutes} minutes. Well done.`;
@@ -849,16 +712,12 @@ function completeSession() {
     }
     logNotification(title, body, "session-complete");
   }
-
   document.getElementById("modal-complete").showModal();
   onGamificationAction();
 }
 
 function tick() {
-  if (remainingSeconds <= 0) {
-    completeSession();
-    return;
-  }
+  if (remainingSeconds <= 0) { completeSession(); return; }
   remainingSeconds -= 1;
   setTimerDisplay();
 }
@@ -907,29 +766,20 @@ document.getElementById("btn-modal-close").addEventListener("click", () => {
   document.getElementById("modal-complete").close();
 });
 
-// Platforms
 function renderPlatforms() {
   const list = document.getElementById("platform-list");
   list.innerHTML = data.platforms
-    .map(
-      (p) => `
-    <li>
+    .map((p) => `<li>
       <span class="platform-icon" aria-hidden="true">${p.icon}</span>
       <label class="platform-name">
         <input type="checkbox" data-id="${p.id}" ${p.blocked ? "checked" : ""} />
         ${escapeHtml(p.name)}
       </label>
-    </li>`
-    )
-    .join("");
-
+    </li>`).join("");
   list.querySelectorAll("input").forEach((input) => {
     input.addEventListener("change", () => {
       const platform = data.platforms.find((x) => x.id === input.dataset.id);
-      if (platform) {
-        platform.blocked = input.checked;
-        saveData(data);
-      }
+      if (platform) { platform.blocked = input.checked; saveData(data); }
     });
   });
 }
@@ -961,7 +811,6 @@ goalSlider.addEventListener("input", () => {
   saveData(data);
 });
 
-// Journal
 function renderJournal() {
   const list = document.getElementById("journal-list");
   if (!data.journal.length) {
@@ -969,23 +818,16 @@ function renderJournal() {
     return;
   }
   list.innerHTML = data.journal
-    .map(
-      (e) => `
-    <li>
+    .map((e) => `<li>
       <div class="journal-entry-date">${formatDate(e.at)}</div>
       <div class="journal-entry-text">${escapeHtml(e.text)}</div>
-    </li>`
-    )
-    .join("");
+    </li>`).join("");
 }
 
 document.getElementById("btn-save-journal").addEventListener("click", () => {
   const input = document.getElementById("journal-input");
   const text = input.value.trim();
-  if (!text) {
-    showToast("Write something first");
-    return;
-  }
+  if (!text) { showToast("Write something first"); return; }
   data.journal.unshift({ text, at: new Date().toISOString() });
   if (data.journal.length > 50) data.journal.length = 50;
   saveData(data);
@@ -996,7 +838,6 @@ document.getElementById("btn-save-journal").addEventListener("click", () => {
   onGamificationAction();
 });
 
-// Export & import
 function downloadFile(filename, content, mime) {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -1008,48 +849,25 @@ function downloadFile(filename, content, mime) {
 }
 
 function exportJournalJson() {
-  if (!data.journal.length) {
-    showToast("No journal entries to export");
-    return;
-  }
-  const payload = {
-    exportedAt: new Date().toISOString(),
-    entries: data.journal,
-  };
-  downloadFile(
-    `mindful-break-journal-${todayKey()}.json`,
-    JSON.stringify(payload, null, 2),
-    "application/json"
-  );
+  if (!data.journal.length) { showToast("No journal entries to export"); return; }
+  downloadFile(`mindful-break-journal-${todayKey()}.json`,
+    JSON.stringify({ exportedAt: new Date().toISOString(), entries: data.journal }, null, 2),
+    "application/json");
   showToast("Journal exported as JSON");
 }
 
 function exportJournalCsv() {
-  if (!data.journal.length) {
-    showToast("No journal entries to export");
-    return;
-  }
+  if (!data.journal.length) { showToast("No journal entries to export"); return; }
   const rows = [["date", "text"]];
-  data.journal.forEach((e) => {
-    rows.push([`"${e.at}"`, `"${e.text.replace(/"/g, '""')}"`]);
-  });
-  const csv = rows.map((r) => r.join(",")).join("\n");
-  downloadFile(`mindful-break-journal-${todayKey()}.csv`, csv, "text/csv");
+  data.journal.forEach((e) => rows.push([`"${e.at}"`, `"${e.text.replace(/"/g, '""')}"`]));
+  downloadFile(`mindful-break-journal-${todayKey()}.csv`, rows.map((r) => r.join(",")).join("\n"), "text/csv");
   showToast("Journal exported as CSV");
 }
 
 function exportFullBackup() {
-  const payload = {
-    app: "Mindful Break",
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    data,
-  };
-  downloadFile(
-    `mindful-break-backup-${todayKey()}.json`,
-    JSON.stringify(payload, null, 2),
-    "application/json"
-  );
+  downloadFile(`mindful-break-backup-${todayKey()}.json`,
+    JSON.stringify({ app: "Mindful Break", version: 1, exportedAt: new Date().toISOString(), data }, null, 2),
+    "application/json");
   showToast("Full backup downloaded");
 }
 
@@ -1070,7 +888,6 @@ function importBackup(file) {
       renderActivity();
       renderPlatforms();
       renderJournal();
-      renderSettings();
       renderNotificationsPage();
       renderForum();
       renderOfflineActivities();
@@ -1092,7 +909,6 @@ document.getElementById("import-file").addEventListener("change", (e) => {
   e.target.value = "";
 });
 
-// Screen-off activities
 let activeOfflineCategory = "physical";
 
 function isOfflineDoneToday(id) {
@@ -1102,58 +918,40 @@ function isOfflineDoneToday(id) {
 function renderOfflineActivities() {
   const countEl = document.getElementById("offline-count");
   if (countEl) countEl.textContent = data.offlineCompleted.length;
-
   const tabsEl = document.getElementById("offline-category-tabs");
   const panelEl = document.getElementById("offline-activities-panel");
   if (!tabsEl || !panelEl) return;
-
   tabsEl.innerHTML = Object.entries(OFFLINE_ACTIVITIES)
-    .map(
-      ([key, cat]) =>
-        `<button type="button" class="category-tab ${key === activeOfflineCategory ? "active" : ""}" data-category="${key}" role="tab">${cat.icon} ${cat.label}</button>`
-    )
-    .join("");
-
+    .map(([key, cat]) =>
+      `<button type="button" class="category-tab ${key === activeOfflineCategory ? "active" : ""}" data-category="${key}" role="tab">${cat.icon} ${cat.label}</button>`
+    ).join("");
   tabsEl.querySelectorAll(".category-tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      activeOfflineCategory = tab.dataset.category;
-      renderOfflineActivities();
-    });
+    tab.addEventListener("click", () => { activeOfflineCategory = tab.dataset.category; renderOfflineActivities(); });
   });
-
   const cat = OFFLINE_ACTIVITIES[activeOfflineCategory];
   panelEl.innerHTML = `<div class="activity-grid">${cat.items
     .map((item) => {
       const done = isOfflineDoneToday(item.id);
-      return `
-        <button type="button" class="activity-card cat-${activeOfflineCategory} ${done ? "done" : ""}" data-activity-id="${item.id}">
-          <span class="activity-card-icon" aria-hidden="true">${cat.icon}</span>
-          <div class="activity-card-body">
-            <h3>${escapeHtml(item.title)}</h3>
-            <p>${escapeHtml(item.desc)}</p>
-            <span class="activity-card-meta">${done ? "✓ Done today" : item.duration}</span>
-          </div>
-        </button>`;
-    })
-    .join("")}</div>`;
-
+      return `<button type="button" class="activity-card cat-${activeOfflineCategory} ${done ? "done" : ""}" data-activity-id="${item.id}">
+        <span class="activity-card-icon" aria-hidden="true">${cat.icon}</span>
+        <div class="activity-card-body">
+          <h3>${escapeHtml(item.title)}</h3>
+          <p>${escapeHtml(item.desc)}</p>
+          <span class="activity-card-meta">${done ? "✓ Done today" : item.duration}</span>
+        </div>
+      </button>`;
+    }).join("")}</div>`;
   panelEl.querySelectorAll(".activity-card").forEach((card) => {
     card.addEventListener("click", () => completeOfflineActivity(card.dataset.activityId));
   });
 }
 
 function completeOfflineActivity(id) {
-  if (isOfflineDoneToday(id)) {
-    showToast("You already completed this today");
-    return;
-  }
+  if (isOfflineDoneToday(id)) { showToast("You already completed this today"); return; }
   let title = id;
   for (const cat of Object.values(OFFLINE_ACTIVITIES)) {
     const item = cat.items.find((i) => i.id === id);
-    if (item) {
-      title = item.title;
-      break;
-    }
+    if (item) { title = item.title; break; }
   }
   data.offlineCompleted.push({ id, date: todayKey(), at: new Date().toISOString() });
   saveData(data);
@@ -1163,52 +961,40 @@ function completeOfflineActivity(id) {
   onGamificationAction();
 }
 
-// Activity forum
 function renderForum() {
   const usernameInput = document.getElementById("forum-username");
   if (usernameInput) usernameInput.value = data.forumUsername;
-
   const list = document.getElementById("forum-list");
   if (!list) return;
-
   if (!data.forumPosts.length) {
     list.innerHTML = '<li class="empty-state">No posts yet. Be the first to share!</li>';
     return;
   }
-
-  list.innerHTML = data.forumPosts
-    .map((post) => {
-      const repliesHtml = (post.replies || [])
-        .map(
-          (r) =>
-            `<li class="forum-reply"><strong>${escapeHtml(r.author)}:</strong> ${escapeHtml(r.text)}</li>`
-        )
-        .join("");
-      return `
-        <li class="forum-post" data-post-id="${post.id}">
-          <div class="forum-post-header">
-            <span class="forum-author">${escapeHtml(post.author)}</span>
-            <span class="forum-date">${formatDate(post.at)}</span>
-          </div>
-          <p class="forum-body">${escapeHtml(post.text)}</p>
-          <div class="forum-actions">
-            <button type="button" class="forum-like-btn ${post.liked ? "liked" : ""}" data-like-id="${post.id}">
-              ♥ ${post.likes || 0}
-            </button>
-            <form class="forum-reply-form" data-reply-id="${post.id}">
-              <input type="text" placeholder="Reply…" maxlength="200" aria-label="Reply to post" />
-              <button type="submit" class="btn btn-secondary btn-sm">Reply</button>
-            </form>
-          </div>
-          ${repliesHtml ? `<ul class="forum-replies">${repliesHtml}</ul>` : ""}
-        </li>`;
-    })
-    .join("");
-
+  list.innerHTML = data.forumPosts.map((post) => {
+    const repliesHtml = (post.replies || [])
+      .map((r) => `<li class="forum-reply"><strong>${escapeHtml(r.author)}:</strong> ${escapeHtml(r.text)}</li>`)
+      .join("");
+    return `<li class="forum-post" data-post-id="${post.id}">
+      <div class="forum-post-header">
+        <span class="forum-author">${escapeHtml(post.author)}</span>
+        <span class="forum-date">${formatDate(post.at)}</span>
+      </div>
+      <p class="forum-body">${escapeHtml(post.text)}</p>
+      <div class="forum-actions">
+        <button type="button" class="forum-like-btn ${post.liked ? "liked" : ""}" data-like-id="${post.id}">
+          ♥ ${post.likes || 0}
+        </button>
+        <form class="forum-reply-form" data-reply-id="${post.id}">
+          <input type="text" placeholder="Reply…" maxlength="200" aria-label="Reply to post" />
+          <button type="submit" class="btn btn-secondary btn-sm">Reply</button>
+        </form>
+      </div>
+      ${repliesHtml ? `<ul class="forum-replies">${repliesHtml}</ul>` : ""}
+    </li>`;
+  }).join("");
   list.querySelectorAll(".forum-like-btn").forEach((btn) => {
     btn.addEventListener("click", () => toggleForumLike(btn.dataset.likeId));
   });
-
   list.querySelectorAll(".forum-reply-form").forEach((form) => {
     form.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -1224,13 +1010,8 @@ function renderForum() {
 function toggleForumLike(postId) {
   const post = data.forumPosts.find((p) => p.id === postId);
   if (!post) return;
-  if (post.liked) {
-    post.liked = false;
-    post.likes = Math.max(0, (post.likes || 0) - 1);
-  } else {
-    post.liked = true;
-    post.likes = (post.likes || 0) + 1;
-  }
+  if (post.liked) { post.liked = false; post.likes = Math.max(0, (post.likes || 0) - 1); }
+  else { post.liked = true; post.likes = (post.likes || 0) + 1; }
   saveData(data);
   renderForum();
 }
@@ -1239,11 +1020,7 @@ function addForumReply(postId, text) {
   const post = data.forumPosts.find((p) => p.id === postId);
   if (!post) return;
   if (!post.replies) post.replies = [];
-  post.replies.push({
-    author: data.forumUsername || "You",
-    text,
-    at: new Date().toISOString(),
-  });
+  post.replies.push({ author: data.forumUsername || "You", text, at: new Date().toISOString() });
   saveData(data);
   renderForum();
   showToast("Reply added");
@@ -1252,19 +1029,11 @@ function addForumReply(postId, text) {
 document.getElementById("btn-forum-post").addEventListener("click", () => {
   const username = document.getElementById("forum-username").value.trim() || "You";
   const text = document.getElementById("forum-post-input").value.trim();
-  if (!text) {
-    showToast("Write a post first");
-    return;
-  }
+  if (!text) { showToast("Write a post first"); return; }
   data.forumUsername = username;
   data.forumPosts.unshift({
-    id: "post-" + Date.now(),
-    author: username,
-    text,
-    at: new Date().toISOString(),
-    likes: 0,
-    liked: false,
-    replies: [],
+    id: "post-" + Date.now(), author: username, text,
+    at: new Date().toISOString(), likes: 0, liked: false, replies: [],
   });
   if (data.forumPosts.length > 100) data.forumPosts.length = 100;
   saveData(data);
@@ -1275,13 +1044,11 @@ document.getElementById("btn-forum-post").addEventListener("click", () => {
   onGamificationAction();
 });
 
-// Notifications page
 function updateNotifBadge() {
   const unread = data.notifications.filter((n) => !n.read).length;
   const btn = document.querySelector('.nav-btn[data-view="notifications"]');
   if (!btn) return;
-  const base = "Alerts";
-  btn.textContent = unread ? `${base} (${unread})` : base;
+  btn.textContent = unread ? `Alerts (${unread})` : "Alerts";
 }
 
 function updateNotificationPermissionUI() {
@@ -1289,8 +1056,7 @@ function updateNotificationPermissionUI() {
   if (!el) return;
   if (!("Notification" in window)) {
     el.textContent = "Notifications are not supported in this browser.";
-    el.className = "hint muted denied";
-    return;
+    el.className = "hint muted denied"; return;
   }
   if (Notification.permission === "granted") {
     el.textContent = "Notifications are enabled.";
@@ -1305,10 +1071,7 @@ function updateNotificationPermissionUI() {
 }
 
 async function requestNotificationPermission() {
-  if (!("Notification" in window)) {
-    showToast("Notifications not supported here");
-    return;
-  }
+  if (!("Notification" in window)) { showToast("Notifications not supported here"); return; }
   const result = await Notification.requestPermission();
   updateNotificationPermissionUI();
   if (result === "granted") {
@@ -1320,34 +1083,24 @@ async function requestNotificationPermission() {
 function renderNotificationHistory() {
   const list = document.getElementById("notification-list");
   if (!list) return;
-
   if (!data.notifications.length) {
-    list.innerHTML = '<li class="empty-state">No notifications yet.</li>';
-    return;
+    list.innerHTML = '<li class="empty-state">No notifications yet.</li>'; return;
   }
-
   const icons = {
-    "daily-checkin": "🔔",
-    "session-complete": "🎉",
-    "activity-suggestion": "🌿",
-    settings: "⚙️",
-    badge: "🏆",
+    "daily-checkin": "🔔", "session-complete": "🎉",
+    "activity-suggestion": "🌿", settings: "⚙️", badge: "🏆",
   };
-  list.innerHTML = data.notifications
-    .map((n) => {
-      const icon = icons[n.type] || "📬";
-      return `
-        <li class="notification-item ${n.read ? "" : "unread"}" data-notif-id="${n.id}">
-          <span class="notification-icon" aria-hidden="true">${icon}</span>
-          <div class="notification-content">
-            <h4>${escapeHtml(n.title)}</h4>
-            <p>${escapeHtml(n.body)}</p>
-            <span class="notification-time">${formatDate(n.at)}</span>
-          </div>
-        </li>`;
-    })
-    .join("");
-
+  list.innerHTML = data.notifications.map((n) => {
+    const icon = icons[n.type] || "📬";
+    return `<li class="notification-item ${n.read ? "" : "unread"}" data-notif-id="${n.id}">
+      <span class="notification-icon" aria-hidden="true">${icon}</span>
+      <div class="notification-content">
+        <h4>${escapeHtml(n.title)}</h4>
+        <p>${escapeHtml(n.body)}</p>
+        <span class="notification-time">${formatDate(n.at)}</span>
+      </div>
+    </li>`;
+  }).join("");
   list.querySelectorAll(".notification-item").forEach((item) => {
     item.addEventListener("click", () => {
       const notif = data.notifications.find((x) => x.id === item.dataset.notifId);
@@ -1361,7 +1114,6 @@ function renderNotificationHistory() {
 
 function renderNotificationsPage() {
   updateNotificationPermissionUI();
-
   const checkinEnabled = document.getElementById("notif-checkin-enabled");
   const checkinTime = document.getElementById("notif-checkin-time");
   const checkinRow = document.getElementById("notif-checkin-time-row");
@@ -1369,9 +1121,7 @@ function renderNotificationsPage() {
   const activityEnabled = document.getElementById("notif-activity-enabled");
   const activityTime = document.getElementById("notif-activity-time");
   const activityRow = document.getElementById("notif-activity-time-row");
-
   if (!checkinEnabled) return;
-
   checkinEnabled.checked = data.remindersEnabled;
   checkinTime.value = data.reminderTime;
   checkinRow.classList.toggle("disabled", !data.remindersEnabled);
@@ -1379,7 +1129,6 @@ function renderNotificationsPage() {
   activityEnabled.checked = data.notifActivityEnabled;
   activityTime.value = data.notifActivityTime;
   activityRow.classList.toggle("disabled", !data.notifActivityEnabled);
-
   renderNotificationHistory();
   updateNotifBadge();
 }
@@ -1388,34 +1137,27 @@ function maybeSendDailyReminder() {
   if (!data.remindersEnabled) return;
   if (data.checkins[todayKey()]) return;
   if (data.lastReminderDate === todayKey()) return;
-
   const now = new Date();
   const [h, m] = data.reminderTime.split(":").map(Number);
   const target = new Date();
   target.setHours(h, m, 0, 0);
-
   if (now >= target) {
     data.lastReminderDate = todayKey();
     saveData(data);
     const title = "Time for your check-in";
     const body = "How did your social media detox go today?";
-    if (Notification.permission === "granted") {
-      sendBrowserNotification(title, body, "daily-checkin");
-    } else {
-      logNotification(title, body, "daily-checkin");
-    }
+    if (Notification.permission === "granted") sendBrowserNotification(title, body, "daily-checkin");
+    else logNotification(title, body, "daily-checkin");
   }
 }
 
 function maybeSendActivitySuggestion() {
   if (!data.notifActivityEnabled) return;
   if (data.lastActivityReminderDate === todayKey()) return;
-
   const now = new Date();
   const [h, m] = data.notifActivityTime.split(":").map(Number);
   const target = new Date();
   target.setHours(h, m, 0, 0);
-
   if (now >= target) {
     data.lastActivityReminderDate = todayKey();
     saveData(data);
@@ -1424,18 +1166,21 @@ function maybeSendActivitySuggestion() {
     const item = cat.items[Math.floor(Math.random() * cat.items.length)];
     const title = "Screen-off idea for today";
     const body = `Try: ${item.title} (${item.duration})`;
-    if (Notification.permission === "granted") {
-      sendBrowserNotification(title, body, "activity-suggestion");
-    } else {
-      logNotification(title, body, "activity-suggestion");
-    }
+    if (Notification.permission === "granted") sendBrowserNotification(title, body, "activity-suggestion");
+    else logNotification(title, body, "activity-suggestion");
   }
 }
 
-function renderSettings() {}
+function renderSettings() {
+  const emailEl = document.getElementById("settings-user-email");
+  const nameEl = document.getElementById("settings-user-name");
+  if (currentUser) {
+    if (emailEl) emailEl.textContent = currentUser.email;
+    if (nameEl) nameEl.textContent = currentUser.name;
+  }
+}
 
 document.getElementById("btn-notif-allow").addEventListener("click", requestNotificationPermission);
-
 document.getElementById("notif-checkin-enabled").addEventListener("change", (e) => {
   data.remindersEnabled = e.target.checked;
   document.getElementById("notif-checkin-time-row").classList.toggle("disabled", !data.remindersEnabled);
@@ -1443,31 +1188,26 @@ document.getElementById("notif-checkin-enabled").addEventListener("change", (e) 
   saveData(data);
   if (data.remindersEnabled && Notification.permission === "default") requestNotificationPermission();
 });
-
 document.getElementById("notif-checkin-time").addEventListener("change", (e) => {
   data.reminderTime = e.target.value;
   data.lastReminderDate = null;
   saveData(data);
 });
-
 document.getElementById("notif-session-enabled").addEventListener("change", (e) => {
   data.notifSessionEnabled = e.target.checked;
   saveData(data);
 });
-
 document.getElementById("notif-activity-enabled").addEventListener("change", (e) => {
   data.notifActivityEnabled = e.target.checked;
   document.getElementById("notif-activity-time-row").classList.toggle("disabled", !data.notifActivityEnabled);
   data.lastActivityReminderDate = null;
   saveData(data);
 });
-
 document.getElementById("notif-activity-time").addEventListener("change", (e) => {
   data.notifActivityTime = e.target.value;
   data.lastActivityReminderDate = null;
   saveData(data);
 });
-
 document.getElementById("btn-clear-notifications").addEventListener("click", () => {
   data.notifications = [];
   saveData(data);
@@ -1475,21 +1215,13 @@ document.getElementById("btn-clear-notifications").addEventListener("click", () 
   updateNotifBadge();
   showToast("Notification history cleared");
 });
-
 document.getElementById("btn-goto-notifications").addEventListener("click", () => switchToView("notifications"));
 
-setInterval(() => {
-  maybeSendDailyReminder();
-  maybeSendActivitySuggestion();
-}, 60_000);
+setInterval(() => { maybeSendDailyReminder(); maybeSendActivitySuggestion(); }, 60_000);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) {
-    maybeSendDailyReminder();
-    maybeSendActivitySuggestion();
-  }
+  if (!document.hidden) { maybeSendDailyReminder(); maybeSendActivitySuggestion(); }
 });
 
-// PWA install & service worker
 let deferredInstallPrompt = null;
 
 window.addEventListener("beforeinstallprompt", (e) => {
@@ -1505,15 +1237,13 @@ window.addEventListener("appinstalled", () => {
 });
 
 function isNativeApp() {
-  return window.Capacitor?.isNativePlatform?.() === true;
+  return typeof window.Capacitor !== "undefined" && window.Capacitor.isNativePlatform?.() === true;
 }
 
 function isAppInstalled() {
-  return (
-    isNativeApp() ||
+  return isNativeApp() ||
     window.matchMedia("(display-mode: standalone)").matches ||
-    window.navigator.standalone === true
-  );
+    window.navigator.standalone === true;
 }
 
 function initInstallUi() {
@@ -1521,23 +1251,16 @@ function initInstallUi() {
   const card = document.getElementById("install-card");
   const btn = document.getElementById("btn-install-pwa");
   const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
-
   if (deferredInstallPrompt || isIos) {
     card.classList.remove("hidden");
-    if (isIos && !deferredInstallPrompt) {
-      btn.textContent = "Add to Home Screen";
-    }
+    if (isIos && !deferredInstallPrompt) btn.textContent = "Add to Home Screen";
   }
 }
 
 document.getElementById("btn-install-pwa").addEventListener("click", async () => {
-  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
   if (!deferredInstallPrompt) {
-    showToast(
-      isIos
-        ? 'Tap Share (↑), then "Add to Home Screen"'
-        : "Use browser menu → Install app"
-    );
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    showToast(isIos ? 'Tap Share (↑), then "Add to Home Screen"' : "Use browser menu → Install app");
     return;
   }
   deferredInstallPrompt.prompt();
@@ -1559,7 +1282,6 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-// Auth UI
 function showAuthError(message) {
   const el = document.getElementById("auth-error");
   el.textContent = message;
@@ -1605,13 +1327,13 @@ function showAuthScreen() {
 }
 
 function signOut() {
-  if (timerInterval) {
-    clearInterval(timerInterval);
-    timerInterval = null;
-  }
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
   timerRunning = false;
-  clearSession();
+  clearToken();
+  clearStoredUser();
+  currentUser = null;
   data = createDefaultData();
+  dataCache = null;
   showAuthScreen();
   document.getElementById("form-login").reset();
   document.getElementById("form-signup").reset();
@@ -1620,76 +1342,51 @@ function signOut() {
 async function handleLogin(e) {
   e.preventDefault();
   clearAuthError();
-  const email = normalizeEmail(document.getElementById("login-email").value);
+  const email = document.getElementById("login-email").value.trim().toLowerCase();
   const password = document.getElementById("login-password").value;
-  const users = getUsers();
-  const user = users.find((u) => u.email === email);
-
-  if (!user) {
-    showAuthError("No account found with this email.");
-    return;
+  try {
+    const result = await apiFetch("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    setToken(result.token);
+    setStoredUser(result.user);
+    currentUser = result.user;
+    data = await loadData();
+    saveData(data);
+    showMainApp();
+    initApp();
+  } catch (err) {
+    showAuthError(err.message);
   }
-
-  const hash = await hashPassword(password, user.salt);
-  if (hash !== user.passwordHash) {
-    showAuthError("Incorrect password. Please try again.");
-    return;
-  }
-
-  setSession(user);
-  migrateLegacyData(user.id);
-  data = loadData();
-  saveData(data);
-  showMainApp();
-  initApp();
 }
 
 async function handleSignup(e) {
   e.preventDefault();
   clearAuthError();
   const name = document.getElementById("signup-name").value.trim();
-  const email = normalizeEmail(document.getElementById("signup-email").value);
+  const email = document.getElementById("signup-email").value.trim().toLowerCase();
   const password = document.getElementById("signup-password").value;
   const confirm = document.getElementById("signup-password-confirm").value;
-
-  if (!name) {
-    showAuthError("Please enter your name.");
-    return;
+  if (!name) { showAuthError("Please enter your name."); return; }
+  if (password.length < 6) { showAuthError("Password must be at least 6 characters."); return; }
+  if (password !== confirm) { showAuthError("Passwords do not match."); return; }
+  try {
+    const result = await apiFetch("/api/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password }),
+    });
+    setToken(result.token);
+    setStoredUser(result.user);
+    currentUser = result.user;
+    data = createDefaultData();
+    data.forumUsername = currentUser.name;
+    saveData(data);
+    showMainApp();
+    initApp();
+  } catch (err) {
+    showAuthError(err.message);
   }
-  if (password.length < 6) {
-    showAuthError("Password must be at least 6 characters.");
-    return;
-  }
-  if (password !== confirm) {
-    showAuthError("Passwords do not match.");
-    return;
-  }
-
-  const users = getUsers();
-  if (users.some((u) => u.email === email)) {
-    showAuthError("An account with this email already exists. Sign in instead.");
-    return;
-  }
-
-  const salt = generateSalt();
-  const passwordHash = await hashPassword(password, salt);
-  const user = {
-    id: "user_" + Date.now(),
-    name,
-    email,
-    salt,
-    passwordHash,
-    createdAt: new Date().toISOString(),
-  };
-
-  users.push(user);
-  saveUsers(users);
-  setSession(user);
-  migrateLegacyData(user.id);
-  data = loadData();
-  saveData(data);
-  showMainApp();
-  initApp();
 }
 
 function initNativeShell() {
@@ -1699,7 +1396,7 @@ function initNativeShell() {
   document.getElementById("mobile-install-banner")?.classList.add("hidden");
 }
 
-function initApp() {
+async function initApp() {
   initNativeShell();
   document.getElementById("ring-progress").style.strokeDasharray = CIRCUMFERENCE;
   setTimerDisplay();
@@ -1722,7 +1419,7 @@ function initApp() {
   showQuote();
 }
 
-function bootstrap() {
+async function bootstrap() {
   document.querySelectorAll(".auth-tab").forEach((btn) => {
     btn.addEventListener("click", () => switchAuthTab(btn.dataset.authTab));
   });
@@ -1731,18 +1428,21 @@ function bootstrap() {
   document.getElementById("btn-sign-out").addEventListener("click", signOut);
   document.getElementById("btn-sign-out-settings").addEventListener("click", signOut);
 
-  const session = getSession();
-  if (session?.userId) {
-    const users = getUsers();
-    const user = users.find((u) => u.id === session.userId);
-    if (user) {
-      currentUser = session;
-      data = loadData();
+  const token = getToken();
+  const storedUser = getStoredUser();
+  if (token && storedUser) {
+    try {
+      const result = await apiFetch("/api/auth/me");
+      currentUser = result.user;
+      setStoredUser(currentUser);
+      data = await loadData();
       showMainApp();
       initApp();
       return;
+    } catch {
+      clearToken();
+      clearStoredUser();
     }
-    clearSession();
   }
   showAuthScreen();
 }
