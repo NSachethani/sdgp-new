@@ -8,7 +8,7 @@ const COPY_FILES = [
   "index.html",
   "styles.css",
   "mobile.css",
-  "app.js",
+  "frontend.js",
   "sw.js",
   "manifest.webmanifest",
 ];
