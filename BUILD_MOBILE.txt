@@ -1,0 +1,58 @@
+MINDFUL BREAK — MOBILE APP (ANDROID)
+====================================
+
+Your project is set up as a native Android app using Capacitor.
+The same web app runs inside a real mobile shell (installable APK).
+
+PREREQUISITES
+-------------
+1. Node.js — https://nodejs.org/
+2. Android Studio — https://developer.android.com/studio
+3. JDK 17+ (usually installed with Android Studio)
+
+QUICK COMMANDS (run in this folder)
+-----------------------------------
+npm install              First time only
+npm run build            Copy web files to www/
+npm run cap:sync         Update Android project
+npm run cap:android      Open Android Studio
+
+BUILD APK IN ANDROID STUDIO
+---------------------------
+1. npm run cap:android
+2. Wait for Gradle sync to finish
+3. Menu: Build → Build Bundle(s) / APK(s) → Build APK(s)
+4. APK path when done:
+   android\app\build\outputs\apk\debug\app-debug.apk
+
+Copy app-debug.apk to your phone and open it to install.
+(Enable "Install unknown apps" if Android asks.)
+
+RUN ON PHONE VIA USB (DEBUG)
+----------------------------
+1. Enable Developer options + USB debugging on phone
+2. Connect USB
+3. In Android Studio: Run ▶ (green play button)
+4. Select your device
+
+TEST IN BROWSER (MOBILE LAYOUT)
+-------------------------------
+npm run serve
+Open http://localhost:8080 on phone (same Wi-Fi) or use browser dev tools.
+
+AFTER CODE CHANGES
+------------------
+Edit index.html, styles.css, mobile.css, app.js in THIS folder (not www/).
+Then always run:
+  npm run cap:sync
+before rebuilding APK in Android Studio.
+
+iOS (Mac only)
+--------------
+npx cap add ios
+npx cap open ios
+Requires Xcode on a Mac.
+
+APP ID
+------
+com.mindfulbreak.detox
